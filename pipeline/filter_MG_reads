@@ -1,0 +1,35 @@
+#####Filter Metagenomics reads-remove adaptors and human reads######
+#remove the adaptors 
+module load trimmomatic/0.36
+java -jar /share/apps/trimmomatic/0.36/trimmomatic-0.36.jar \
+PE \
+${sample}.r1.fastq.gz \
+${sample}.r2.fastq.gz \
+${sample}.trimmed.r1.fastq \
+${sample}.trimmed.se.r1.fastq \
+${sample}.trimmed.r2.fastq \
+${sample}.trimmed.se.r2.fastq \
+ILLUMINACLIP:TruSeq3-PE-2.fa:2:30:10 \
+LEADING:3 \
+TRAILING:3 \
+SLIDINGWINDOW:4:15 \
+MINLEN:28 \
+
+#combine files
+module load python/intel/2.7.12
+
+python interleave-fastq.py ${sample}.trimmed.r1.fastq ${sample}.trimmed.r2.fastq > ${sample}.trimmed.interleaved.fastq
+cat ${sample}.trimmed.se.r1.fastq ${sample}.trimmed.se.r2.fastq > ${sample}.trimmed.se.fastq
+cat ${sample}.trimmed.interleaved.fastq ${sample}.trimmed.se.fastq > ${sample}.trimmed.fastq
+
+#remove the human, flu and phix reads 
+module load deconseq/0.4.3
+perl  ./deconseq-standalone-0.4.3/deconseq.pl -id ${sample}.filtered  -f ${sample}.trimmed.fastq  -dbs hg19_phix_index  -out_dir ./mydir
+
+#extract paired end reads from the filtered reads files 
+python  extract-paired-reads-from-one-file.py  ${sample}.filtered.fq  ${sample}.clean
+#interleave the fastq files
+python interleave-fastq.py ${sample}.clean.r1.fq  ${sample}.clean.r2.fq > ${sample}.final.interleaved.fastq
+
+
+

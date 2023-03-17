@@ -1,0 +1,121 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+```{r}
+library(rlist)
+library(taxize)
+
+WORKING.DIR="z:/mchung/lingdi_zhang_01/"
+
+```
+
+
+```{r}
+blastn.outputs <- list.files(paste0(WORKING.DIR,"/blastn/"),
+                             pattern="blastn.tsv")
+```
+
+
+```{r}
+accessions <- c()
+
+for(i in 1:length(blastn.outputs)){
+  accessions <- c(accessions,
+                  read.delim(paste0(WORKING.DIR,"/blastn/",blastn.outputs[i]),
+                       header = F)[,2])
+}
+accessions <- unique(accessions)
+
+
+```
+
+```{r}
+taxize <- taxize::genbank2uid(id = accessions)
+taxid <- lapply(taxize,function(x){print(x[[1]][[1]])})
+taxid <- unlist(taxid)
+
+classification <- taxize::classification(taxid, db="ncbi")
+
+ranks <- c("superkingdom","clade","kingdom","phylum","class",
+           "order","family","subfamily","genus","species",
+           "isolate","serotype")
+
+
+taxa.df <- as.data.frame(matrix(nrow=length(classification),
+                                ncol=1+length(ranks)))
+rownames(taxa.df) <- accessions
+colnames(taxa.df) <- c("taxid",ranks)
+for(i in 1:nrow(taxa.df)){
+  classification.subset <- classification[[i]]
+  taxa.df[i,] <- classification.subset$name[match(colnames(taxa.df),classification.subset$rank)]
+}
+taxa.df$taxid <- taxid
+```
+
+
+```{r}
+sample <- c()
+contig <- c()
+taxinfo <- list()
+
+for(i in 1:length(blastn.outputs)){
+  blastn <- read.delim(paste0(WORKING.DIR,"/blastn/",blastn.outputs[i]),
+                       header = F)
+  contigs <- unique(blastn[,1])
+  
+  for(j in 1:length(contigs)){
+    blastn.subset <- blastn[blastn[,1] == contigs[j],]
+    blastn.subset <- blastn.subset[blastn.subset[,11] == min(blastn.subset[,11]),]
+    
+    taxa.df.subset <- taxa.df[blastn.subset[,2],]
+    taxa.df.subset <- apply(taxa.df.subset,2,function(x){ifelse(length(table(x,useNA="ifany")) == 1,return(unique(x)),return(NA))})
+
+    sample <- c(sample,gsub(".blastn.tsv","",blastn.outputs[i]))
+    contig <- c(contig,contigs[j])
+    taxinfo <- rlist::list.append(taxinfo,
+                                  taxa.df.subset)
+    
+  }
+}
+
+blast_hits_to_taxa <- as.data.frame(matrix(nrow=length(sample),
+                                           ncol=2+length(ranks)))
+colnames(blast_hits_to_taxa) <- c("sample","contigs",ranks)
+for(i in 1:nrow(blast_hits_to_taxa)){
+  blast_hits_to_taxa[i,3:ncol(blast_hits_to_taxa)] <- taxinfo[[i]][2:length(taxinfo[[i]])]
+  print(i)
+}
+blast_hits_to_taxa$sample <- sample
+blast_hits_to_taxa$contigs <- contig
+
+```
+
+```{r}
+idxstats.files <- list.files(paste0(WORKING.DIR,"/minimap2/"),pattern="idxstats.tsv")
+
+species <- sort(unique(blast_hits_to_taxa$species))
+species <- species[!is.na(species)]
+counts <- as.data.frame(matrix(nrow=length(unique(species)),
+                               ncol=length(idxstats.files)))
+rownames(counts)<- species
+colnames(counts) <- gsub("[.]virus.bam.*","",idxstats.files)
+for(i in 1:length(idxstats.files)){
+  idxstats <- read.delim(paste0(WORKING.DIR,"/minimap2/",idxstats.files[i]),header=F)
+  colnames(idxstats) <- c("contig","length","mapped_reads","unmapped_segments")
+  idxstats <- cbind(idxstats[match(paste0(blast_hits_to_taxa$sample,"|",blast_hits_to_taxa$contigs),idxstats[,1]),1:3],
+                    blast_hits_to_taxa[,3:ncol(blast_hits_to_taxa)])
+  for(j in 1:nrow(counts)){
+    counts[j,i] <- sum(idxstats$mapped_reads[idxstats$species == rownames(counts)[j] & !is.na(idxstats$species)])
+  }
+  print(i)
+}
+```
+
+
+```{r}
+save(file = paste0(WORKING.DIR,"virus_upstream.R"),
+     counts,
+     blast_hits_to_taxa)
+```

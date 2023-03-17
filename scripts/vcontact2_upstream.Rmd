@@ -1,0 +1,57 @@
+```{r}
+# library(ggplot2)
+# library(matrixStats)
+# library(randomcoloR)
+# library(reshape2)
+
+WORKING.DIR="z:/mchung/lingdi_zhang_01/"
+```
+
+```{r}
+
+samples <- list.files(paste0(WORKING.DIR,"/vcontact2/"))
+
+exclude_samples <- c("MG_Neg.2.28","MG_Neg.3.5","MG_neg.4.5","MG_Neg.7.10","MG_Neg.7.16",
+                     "MG_Neg.7.20","MG_Neg.7.3","MG_Neg.7.4","MG_neg.8.2","MG_Neg.8.2",
+                     "MG_neg.8.7")
+
+sample <- c()
+contig <- c()
+family_assignment <- c()
+genus_assignment <- c()
+for(i in 1:length(samples)){
+  if(!(samples[i] %in% exclude_samples)){
+    clusters <- read.delim(paste0(WORKING.DIR,"/vcontact2/",samples[i],"/viral_cluster_overview.csv"),
+                           sep=",")
+    clusters <- clusters[grepl("NODE",clusters$Members) & clusters$genus != "[\'Unassigned\']",]
+    
+    for(j in 1:nrow(clusters)){
+      contigs <- unlist(strsplit(clusters$Members[j],split=","))
+      contigs <- grep("NODE",contigs,value=T)
+      
+      genus <- gsub(" ","",gsub("\'","",gsub("[]]","",gsub("[[]","",clusters$genus[j]))))
+      genus <- unlist(strsplit(genus,split=","))
+      genus <- genus[genus != "Unassigned"]
+      genus <- ifelse(length(genus) == 1, paste0("g__",genus),NA)
+      
+      family <- gsub(" ","",gsub("\'","",gsub("[]]","",gsub("[[]","",clusters$family[j]))))
+      family <- unlist(strsplit(family,split=","))
+      family <- family[family != "Unassigned"]
+      family <- ifelse(length(family) == 1, paste0("f__",family),NA)
+      
+      sample <- c(sample,rep(samples[i],length(contigs)))
+      contig <- c(contig,contigs)
+      family_assignment <- c(family_assignment,rep(family,length(contigs)))
+      genus_assignment <- c(genus_assignment,rep(genus,length(contigs)))
+    }
+  }
+  
+}
+  
+vcontact2.contig_map <- as.data.frame(cbind(sample,contig,family_assignment,genus_assignment))
+
+
+save(file = paste0(WORKING.DIR,"/vcontact2_upstream.R"),
+     vcontact2.contig_map)
+
+```

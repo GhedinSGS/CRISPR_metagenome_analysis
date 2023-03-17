@@ -1,0 +1,60 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+```{r}
+# library(rlist)
+# library(taxize)
+
+WORKING.DIR="z:/mchung/lingdi_zhang_01/"
+```
+
+```{r}
+idxstats.files <- list.files(paste0(WORKING.DIR,"/minimap2/"),pattern ="idxstats.tsv")
+idxstats.files <- grep("bacteria",idxstats.files,value = T)
+
+mags <- read.delim(paste0(WORKING.DIR,"/minimap2/",idxstats.files[1]),header = F)[,1]
+
+counts.raw <- as.data.frame(matrix(nrow=length(mags),
+                                   ncol=length(idxstats.files)))
+rownames(counts.raw) <- mags
+colnames(counts.raw) <- gsub("[.]bacteria.*","",idxstats.files)
+for(i in 1:length(idxstats.files)){
+  idxstats <- read.delim(paste0(WORKING.DIR,"/minimap2/",idxstats.files[i]),header = F)
+  
+  counts.raw[,i] <- idxstats[match(rownames(counts.raw),idxstats[,1]),3]
+}
+```
+
+```{r}
+gtdbtk.anno <- read.delim(paste0(WORKING.DIR,"/gtdbtk/gtdbtk.bac120.summary.tsv"))
+vamb.clusters <- read.delim(paste0(WORKING.DIR,"/vamb/output/clusters.tsv"),header=F)
+```
+
+```{r}
+taxa <- sort(unique(gtdbtk.anno$classification))
+counts.cluster <- as.data.frame(matrix(nrow=length(taxa),
+                                       ncol=length(idxstats.files)))
+rownames(counts.cluster) <- taxa
+colnames(counts.cluster) <- gsub("[.]bacteria.*","",idxstats.files)
+for(i in 1:nrow(counts.cluster)){
+  clusters <- gtdbtk.anno$user_genome[gtdbtk.anno$classification == rownames(counts.cluster)[i]]
+  contigs <- vamb.clusters[vamb.clusters[,1] %in% clusters,2]
+  
+  counts.subset <- counts.raw[contigs,]
+  if(nrow(counts.subset) == 1){
+    counts.clusters[i,] <- counts.subset
+  }else{
+    counts.cluster[i,] <- colSums(counts.subset)
+  }
+  print(i)
+}
+
+write.table(counts.cluster,
+            paste0(WORKING.DIR,"/counts.gtdbtk.tsv"),
+            row.names = T,
+            col.names = T,
+            quote = F,
+            sep = "\t")
+```

@@ -1,0 +1,83 @@
+# Conduct MAG analysis
+
+## Assemble contigs from metagenome samples
+```{bash, eval = F}
+module load spades/3.15.2
+
+find "$WORKING_DIR"/reads/ -name "*.1.fastq.gz" | sed "s/[.][12].fastq.gz//g" | sed "s/.*\\///g" | sort -n | while read SAMPLE
+do
+qsub -pe threaded 16 -l h_vmem=10G -cwd -b y spades.py --meta -t 16 -1 "$WORKING_DIR"/reads/"$SAMPLE".1.fastq.gz -2 "$WORKING_DIR"/reads/"$SAMPLE".2.fastq.gz -o "$WORKING_DIR"/spades/"$SAMPLE"/
+done
+```
+
+## Create viral MAG library
+
+## Run first pass on VirSorter to identify viral contigs
+
+```{bash, eval = F}
+module load virsorter/2.2.3-Python-3.8.10
+find "$WORKING_DIR"/reads/ -name "*.1.fastq.gz" | sed "s/[.][12].fastq.gz//g" | sed "s/.*\\///g" | sort -n | while read SAMPLE
+do
+qsub -pe threaded 16 -l h_vmem=5G -cwd -b y virsorter run -i "$WORKING_DIR"/spades/"$SAMPLE"/contigs.fasta -w "$WORKING_DIR"/virsorter_pass1/"$SAMPLE"/ --min-length 1000 -j 16
+done
+```
+
+## Run CheckV to identify and remove host and viral positions in each contig
+
+```{bash, eval = F}
+module load checkv/0.8.1
+find "$WORKING_DIR"/virsorter_pass1/ -name "final-viral-combined.fa" | while read VIRSORTER_OUTPUT
+do
+qsub -pe threaded 16 -l h_vmem=5G -cwd -b y checkv end_to_end "$VIRSORTER_OUTPUT" "$WORKING_DIR"/checkv/"$(dirname $VIRSORTER_OUTPUT | sed "s/.*\\///g")" -t 16
+done
+```
+
+## Run second pass on VirSorter to prep contigs for classification and annotation
+
+```{bash, eval = F}
+module load virsorter/2.2.3-Python-3.8.10
+
+ls "$WORKING_DIR"/checkv | while read SAMPLE
+do
+cat "$WORKING_DIR"/checkv/"$SAMPLE"/proviruses.fna "$WORKING_DIR"/checkv/"$SAMPLE"/viruses.fna > "$WORKING_DIR"/checkv/"$SAMPLE"/combined_viruses.fna
+qsub -pe threaded 16 -l h_vmem=5G -cwd -b y virsorter run --seqname-suffix-off --viral-gene-enrich-off --prep-for-dramv -i "$WORKING_DIR"/checkv/"$SAMPLE"/combined_viruses.fna -w "$WORKING_DIR"/virsorter_pass2/"$SAMPLE" --include-groups dsDNAphage,ssDNA --min-length 1000 -j 16
+done
+```
+
+## Identify taxonomy for viral contigs using blastn
+
+```{bash, eval = F}
+module load blast+/2.13.0
+
+ls "$WORKING_DIR"/virsorter_pass2/ | while read SAMPLE
+do
+qsub -pe threaded 4 -l h_vmem=5G -cwd -b y blastn -db /hpcdata/lpd_sg/mchung/databases/blast_db/viral.1.1.genomic.fna -query "$WORKING_DIR"/virsorter_pass2/"$SAMPLE"/final-viral-combined.fa -out "$WORKING_DIR"/blastn/"$SAMPLE".blastn.tsv -num_threads 4 -outfmt 6
+done
+```
+
+### Map reads to MAGs
+```{bash, eval = F}
+module load minimap2/2.24
+module load samtools/1.9-goolf-1.7.20
+
+find "$WORKING_DIR"/reads/ -name "*.1.fastq.gz" | grep -v metatranscriptome | sed "s/[.][12].fastq.gz//g" | sed "s/.*\\///g" | sort -n | while read SAMPLE
+do
+echo -e "minimap2 -t 16 -ax sr "$WORKING_DIR"/minimap2/virus.fna "$WORKING_DIR"/reads/"$SAMPLE".1.fastq.gz "$WORKING_DIR"/reads/"$SAMPLE".2.fastq.gz | samtools view -F 2308 -b --threads 16 - | samtools sort -@ 16 -o "$WORKING_DIR"/minimap2/"$SAMPLE".virus.bam -" | qsub -pe threaded 16 -l h_vmem=5G -cwd
+done
+```
+
+### Quantify MAGs
+```{bash, eval = F}
+find "$WORKING_DIR"/minimap2/ -name "*.bam" | grep virus | while read BAM
+do
+qsub -pe threaded 16  -l h_vmem=5G -cwd -b y samtools index -@ 16 "$BAM"
+done
+
+find "$WORKING_DIR"/minimap2/ -name "*.bam" | grep virus | while read BAM
+do
+echo -e "samtools idxstats -@ 16 "$BAM" > "$BAM".idxstats.tsv" | qsub -pe threaded 16  -l h_vmem=5G -cwd
+done
+```
+
+####Differential abundance analysis
+Viral_DA_analysis.R

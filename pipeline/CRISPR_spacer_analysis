@@ -1,0 +1,25 @@
+###Spacer identification
+#Using CrAss to pull CRISPR associated elements from FASTQ Reads
+#Load crAss/2.1
+import os, glob 
+bacterialReads = glob.glob("./*.bacteria_reads.fq")
+for i in bacterialReads:
+	samplename = i.split("/")[-1].split("reads")[0]
+	command = "crass -o ./crass_out_bacteria_reads/%s %s" % (samplename, i)
+	os.system(command)
+
+#Using crisprtools to extract spacers from crass.crispr files
+#Load crisprtools/intel/0.1.8
+import os, glob
+crass_output = glob.glob("./crass_out_bacteria_reads/*/crass.crispr")
+for i in crass_output:
+	samplename = i.split("/")[-2]
+	command = 'crisprtools extract -s %s > ./crisprtools_spacers/%s.fa' % (i, samplename)
+	os.system(command)
+
+#rename the spacers sequence headers and pool across the samples
+##cd-hit clustering
+module load  cdhit/intel/4.6.8
+cd-hit-est  -i   spacers_pool_rename.fa    -d 0  -o   spacers_pool_rename_cluster
+###Spacer analysis
+CRISPR_analysis.Rmd

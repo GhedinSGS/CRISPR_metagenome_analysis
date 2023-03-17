@@ -1,0 +1,109 @@
+
+```{r,fig.height=7,fig.width=6}
+library(dendextend)
+library(ggdendro)
+library(ggplot2)
+library(matrixStats)
+
+directory <- "Z:/mchung/leopoldo_segal_08/pipeline_output/"
+
+counts <- read.delim(paste0(directory,"/tables/counts.taxa.bracken.tsv"),
+                     header = T)
+
+```
+# Plot top viral MAG species hits
+```{r,fig.height=7,fig.width=6}
+relab <- as.data.frame(apply(counts,2,function(x){x/sum(x)*100}))
+
+plot.df <- relab
+top_taxa <- rownames(plot.df)[order(-rowMedians(as.matrix(plot.df)))][1:50]
+
+plot.df <- reshape2::melt(as.matrix(plot.df))
+plot.df <- plot.df[plot.df[,1] %in% top_taxa,]
+plot.df[,1] <- factor(plot.df[,1],levels=rev(top_taxa))
+
+#set.seed(87)
+colors <- randomcoloR::distinctColorPalette(k=length(top_taxa))
+colors <- colors[1:nrow(counts)]
+
+ggplot()+
+  geom_boxplot(aes(x=plot.df[,3]+1,y=plot.df[,1]),fill=colors)+
+  labs(x="",y="",title="Top Virus MAG Species")+
+  scale_x_continuous(trans="log10")+
+  theme_bw()
+```
+
+
+## Cluster samples based on taxa profile
+
+```{r,fig.height=6,fig.width=15}
+plot.df <- relab
+
+dist_mat <- dist(t(plot.df), method = 'euclidean')
+hc <- hclust(dist_mat, method = 'ward.D2')
+clusters <- cutree(hc,k=4)
+
+hcdata <- as.dendrogram(hc)
+hcdata
+ggdendrogram(hcdata)+
+  theme(axis.text.x=element_text(color=clusters[hc$order]))
+
+phylo <- as.phylo(hc)
+plot(as.phylo(hc), type = "unrooted", cex = 0.6,tip.color=clusters,
+     no.margin = TRUE)
+```
+
+## Plot viral MAG profile for each sample
+
+```{r,fig.height=8,fig.width=18}
+plot1.df <- as.data.frame(cbind(names(clusters[hc$order]),
+                                colSums(counts[,names(clusters[hc$order])])))
+plot1.df[,1] <-factor(plot1.df[,1],levels=plot1.df[,1])
+
+plot1 <- ggplot()+
+  geom_bar(aes(x=plot1.df[,1],y=as.numeric(as.character(plot1.df[,2]))),
+           stat="identity")+
+  labs(x="",y="viral\nMAG counts")+
+  theme_bw()+
+  scale_y_continuous(expand=c(0,NA))+
+  coord_cartesian(ylim=c(0,100000))+
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank())
+
+plot2.df <- as.data.frame(cbind(names(clusters[hc$order]),
+                                paste0("c",clusters[hc$order])))
+plot2.df[,1] <-factor(plot2.df[,1],levels=plot2.df[,1])
+plot2 <- ggplot()+
+  geom_tile(aes(x=plot2.df[,1],y="Cluster",
+                fill=plot2.df[,2]))+
+  labs(fill="Cluster")+
+  scale_y_discrete(expand=c(0,0))+
+  scale_fill_manual(values=c("#000000","#e895b0","#88bf5a","#6ebbf3"))+
+  guides(fill=guide_legend(nrow=1))+
+  theme_bw()+
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.title.y = element_blank())
+
+
+plot3.df <- relab[,names(clusters[hc$order])]
+top_taxa <- rownames(plot3.df)[order(-rowMedians(as.matrix(plot3.df)))][1:50]
+
+plot3.df <- reshape2::melt(as.matrix(plot3.df))
+plot3.df[,1] <- ifelse(plot3.df[,1] %in% top_taxa,as.character(plot3.df[,1]),"Other")
+plot3.df[,1] <- factor(plot3.df[,1],levels=c(top_taxa,"Other"))
+plot3.df[,2] <- factor(plot3.df[,2],levels=names(clusters[hc$order]))
+
+plot3 <- ggplot()+
+  geom_bar(aes(x=plot3.df[,2],y=plot3.df[,3],fill=plot3.df[,1]),
+           stat="identity")+
+  labs(x="",y="relative abundance",fill="Taxa")+
+  scale_fill_manual(values = c(rev(colors),"darkgrey"))+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+egg::ggarrange(plot1,plot2,plot3,
+               heights=c(1,0.25,10),
+               ncol=1)
+
+```

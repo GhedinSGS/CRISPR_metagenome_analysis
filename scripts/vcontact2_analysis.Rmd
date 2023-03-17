@@ -1,0 +1,484 @@
+```{r}
+library(ggdendro)
+library(ggplot2)
+library(matrixStats)
+library(randomcoloR)
+library(reshape2)
+library(vegan)
+
+WORKING.DIR="z:/mchung/lingdi_zhang_01/"
+
+load(paste0(WORKING.DIR,"/vcontact2_upstream.R"))
+```
+
+
+```{r}
+vcontact2.contig_map <- vcontact2.contig_map[!is.na(vcontact2.contig_map$genus_assignment),]
+```
+
+```{r}
+idxstats.files <- list.files(paste0(WORKING.DIR,"/minimap2/"),pattern="idxstats.tsv")
+idxstats.files <- grep("virus",idxstats.files,value=T)
+
+species <- sort(unique(vcontact2.contig_map$genus_assignment))
+species <- species[!is.na(species)]
+counts <- as.data.frame(matrix(nrow=length(unique(species)),
+                               ncol=length(idxstats.files)))
+rownames(counts)<- species
+colnames(counts) <- gsub("[.]virus.bam.*","",idxstats.files)
+for(i in 1:length(idxstats.files)){
+  idxstats <- read.delim(paste0(WORKING.DIR,"/minimap2/",idxstats.files[i]),header=F)
+  colnames(idxstats) <- c("contig","length","mapped_reads","unmapped_segments")
+  
+  
+  idxstats <- cbind(idxstats[match(paste0(vcontact2.contig_map$sample,"|",vcontact2.contig_map$contig),idxstats[,1]),1:3],
+                    vcontact2.contig_map$genus_assignment)
+  colnames(idxstats)[4] = "genus"
+  for(j in 1:nrow(counts)){
+    counts[j,i] <- sum(idxstats$mapped_reads[idxstats$genus == rownames(counts)[j] & !is.na(idxstats$genus)])
+  }
+  print(i)
+}
+```
+
+
+## Calculate relative abundance
+```{r}
+relab <- as.data.frame(apply(counts,2,function(x){x/sum(x)*100}))
+```
+
+
+## Plot viral MAG counts from each sample
+
+```{r,fig.height=8,fig.width=18}
+plot1 <- ggplot()+
+  geom_bar(aes(x=colnames(counts),y=colSums(counts)),
+           stat="identity")+
+  labs(x="",y="viral MAG counts")+
+  scale_y_continuous(expand=c(0,NA))+
+  theme_bw()+
+  theme(axis.text.x = element_blank())
+
+plot2 <- ggplot()+
+  geom_bar(aes(x=colnames(counts),y=colSums(counts)),
+           stat="identity")+
+  labs(x="",y="viral MAG counts")+
+  theme_bw()+
+  scale_y_continuous(expand=c(0,NA))+
+  coord_cartesian(ylim=c(0,100000))+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+egg::ggarrange(plot1,plot2,ncol=1)
+```
+
+
+# Plot top viral MAG species hits
+```{r,fig.height=7,fig.width=6}
+plot.df <- relab[,grep("[Nn]eg",colnames(relab),invert=T)]
+top_taxa <- rownames(plot.df)[order(-rowMedians(as.matrix(plot.df)))][1:16]
+
+plot.df <- reshape2::melt(as.matrix(plot.df))
+plot.df <- plot.df[plot.df[,1] %in% top_taxa,]
+plot.df[,1] <- factor(plot.df[,1],levels=rev(top_taxa))
+
+set.seed(87)
+colors <- randomcoloR::distinctColorPalette(k=length(top_taxa))
+
+pdf(paste0(WORKING.DIR,"/plots/top_viral_MAG_species.vcontact2.boxplot.pdf"),
+    height=7,
+    width=6)
+ggplot()+
+  geom_boxplot(aes(x=plot.df[,3]+1,y=plot.df[,1]),fill=colors)+
+  labs(x="",y="",title="Top Viral MAG Species")+
+  scale_x_continuous(trans="log10")+
+  theme_bw()
+dev.off()
+
+```
+
+
+## Cluster samples based on taxa profile
+
+```{r,fig.height=6,fig.width=15}
+plot.df <- relab[,grep("[Nn]eg",colnames(relab),invert=T)]
+
+dist_mat <- dist(t(plot.df), method = 'euclidean')
+hc <- hclust(dist_mat, method = 'ward.D2')
+clusters <- cutree(hc,k=4)
+
+hcdata <- as.dendrogram(hc)
+hcdata
+ggdendrogram(hcdata)+
+  theme(axis.text.x=element_text(color=clusters[hc$order]))
+
+phylo <- as.phylo(hc)
+plot(as.phylo(hc), type = "unrooted", cex = 0.6,tip.color=clusters,
+     no.margin = TRUE)
+```
+
+## Plot viral MAG profile for each sample
+
+```{r,fig.height=8,fig.width=18}
+plot1.df <- as.data.frame(cbind(names(clusters[hc$order]),
+                                colSums(counts[,names(clusters[hc$order])])))
+plot1.df[,1] <-factor(plot1.df[,1],levels=plot1.df[,1])
+
+plot1 <- ggplot()+
+  geom_bar(aes(x=plot1.df[,1],y=as.numeric(as.character(plot1.df[,2]))),
+           stat="identity")+
+  labs(x="",y="viral\nMAG counts")+
+  theme_bw()+
+  scale_y_continuous(expand=c(0,NA))+
+  coord_cartesian(ylim=c(0,100000))+
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank())
+
+plot2.df <- as.data.frame(cbind(names(clusters[hc$order]),
+                                paste0("c",clusters[hc$order])))
+plot2.df[,1] <-factor(plot2.df[,1],levels=plot2.df[,1])
+plot2 <- ggplot()+
+  geom_tile(aes(x=plot2.df[,1],y="Cluster",
+                fill=plot2.df[,2]))+
+  labs(fill="Cluster")+
+  scale_y_discrete(expand=c(0,0))+
+  scale_fill_manual(values=c("#000000","#e895b0","#88bf5a","#6ebbf3"))+
+  guides(fill=guide_legend(nrow=1))+
+  theme_bw()+
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.title.y = element_blank())
+
+
+plot3.df <- relab[,names(clusters[hc$order])]
+top_taxa <- rownames(plot3.df)[order(-rowMedians(as.matrix(plot3.df)))][1:50]
+
+plot3.df <- reshape2::melt(as.matrix(plot3.df))
+plot3.df[,1] <- ifelse(plot3.df[,1] %in% top_taxa,as.character(plot3.df[,1]),"Other")
+plot3.df[,1] <- factor(plot3.df[,1],levels=c(top_taxa,"Other"))
+plot3.df[,2] <- factor(plot3.df[,2],levels=names(clusters[hc$order]))
+
+plot3 <- ggplot()+
+  geom_bar(aes(x=plot3.df[,2],y=plot3.df[,3],fill=plot3.df[,1]),
+           stat="identity")+
+  labs(x="",y="relative abundance",fill="Taxa")+
+  scale_fill_manual(values = c(rev(colors),"darkgrey"))+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+egg::ggarrange(plot1,plot2,plot3,
+               heights=c(1,0.25,10),
+               ncol=1)
+pdf(paste0(WORKING.DIR,"/plots/viral_MAG_profiles.vcontact2.barplot.pdf"),
+    height=8,
+    width=20,
+    onefile=FALSE)
+egg::ggarrange(plot1,plot2,plot3,
+               heights=c(1,0.25,10),
+               ncol=1)
+dev.off()
+```
+
+```{r,fig.height=8,fig.width=6}
+individuals <- sort(unique(gsub("[.].*","",names(clusters[hc$order]))))
+
+plot.df <- as.data.frame(matrix(nrow=length(individuals),
+                                ncol=4))
+rownames(plot.df) <- individuals
+colnames(plot.df) <- sort(unique(clusters[hc$order]))
+
+for(i in 1:nrow(plot.df)){
+  if(rownames(plot.df)[i] != "MG_positive"){
+    set <- clusters[grep(paste0(individuals[i],"[.]"),names(clusters))]
+  }else{
+    set <- clusters[grep(individuals[i],names(clusters))]
+
+  }
+  for(j in 1:ncol(plot.df)){
+    plot.df[i,j] <- length(which(set == colnames(plot.df[j])))
+  }
+}
+colnames(plot.df) <- paste0("c",colnames(plot.df))
+
+plot.df <- melt(as.matrix(plot.df))
+plot.df[,1] <- factor(plot.df[,1],levels=rev(individuals))
+
+ggplot()+
+  geom_bar(aes(x=plot.df[,1],y=plot.df[,3],fill=plot.df[,2]),
+           stat="identity")+
+  scale_fill_manual(values=c("#000000","#e895b0","#88bf5a","#6ebbf3"))+
+  labs(x="",y="# of samples",fill="Cluster")+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  coord_flip()
+
+```
+
+## Plot cluster profile for each individual
+
+```{r}
+plot_braycurtis_mds <- function(counts,groups,title,labs = T){
+  counts <- counts[,!(is.na(groups))]
+  groups <- groups[!is.na(groups)]
+  
+  ddsv <- DESeqDataSetFromMatrix(countData = counts,
+                                 colData = as.data.frame(groups),
+                                 design = ~groups)
+  idx <- which(colSums(counts(ddsv)) == 0)
+  if(length(idx) > 0){ddsv <- ddsv[ , -idx]}
+
+  gm_mean = function(x, na.rm=TRUE){ exp(sum(log(x[x > 0]), na.rm=na.rm) / length(x))}
+  geoMeans = apply(counts(ddsv), 1, gm_mean)
+  
+  ddsv <- estimateSizeFactors(ddsv, geoMeans = geoMeans)
+  vsdv <- varianceStabilizingTransformation(ddsv)
+  vsdv0 <- ifelse(assay(vsdv)<0,0,assay(vsdv))
+  
+  vegdist <- vegdist(as.data.frame(t(vsdv0)),method="bray")
+  cmdScale <- cmdscale(vegdist, k =10)
+  vars <- apply(cmdScale, 2, var)
+  percentVar <- round(100 * (vars/sum(vars)))
+
+  newResults <- as.data.frame(cbind(cmdScale,
+                                    as.character(vsdv$groups)))
+  colnames(newResults)[1] <- "PC1"
+  colnames(newResults)[2] <- "PC2"
+  colnames(newResults)[ncol(newResults)] <- "groups"
+  
+  centroids <- aggregate(cbind(as.numeric(as.character(PC1)),
+                               as.numeric(as.character(PC2))) ~ groups,
+                         data= newResults, mean)
+  colnames(centroids) <- c("groups","PC1","PC2")
+  newResults <- merge(newResults,centroids,by="groups",suffixes=c("",".centroid"))
+
+  for(i in 2:ncol(newResults)){newResults[,i] <- as.numeric(as.character(newResults[,i]))}
+  
+  newResults <- as.data.frame(newResults)
+  
+  data.adonis <- data.frame(colData(vsdv))
+        
+  samplepermanova <- adonis(vegdist ~ groups, data.adonis)
+  samplepermanova <- as.data.frame(samplepermanova$aov.tab)
+  samplepermanova <- samplepermanova$'Pr(>F)'[1]
+  
+  plot.mds <- ggplot() + # Graph PC1 and PC2
+    geom_segment(aes(x=!!newResults$PC1.centroid, y=!!newResults$PC2.centroid,
+                     xend=!!newResults$PC1, yend=!!newResults$PC2, color=!!newResults$groups))+ 
+    geom_point(aes(x=!!newResults$PC1, y=!!newResults$PC2,
+                   color=!!newResults$groups),size=5,alpha=0.5) + # Set the size of the points
+    #geom_text(aes(x=0.1,y=-0.1),color="black",label=paste0("p<",samplepermanova))+
+    labs(title=paste0("Bray-Curtis MDS Plot\n",title," | Pr(>F) = ",samplepermanova),
+         x=paste0("MDS1: ",percentVar[1],"% variance"),
+         y=paste0("MDS2: ",percentVar[2],"% variance"))+
+    guides(color="none")+
+    #scale_color_manual(values=c("#1700F5", "#BEBEBE", "#F7A501")) + 
+    theme_bw()+
+    theme(plot.title = element_text(size=8))
+  if(labs == T){
+    plot.mds <- plot.mds +
+      geom_label_repel(aes(x=!!centroids$PC1, y=!!centroids$PC2, label=!!centroids$groups,color=!!centroids$groups), size=5)
+  }
+  
+  n_samples <- sort(table(groups))[1]
+  min_reads <- 10
+  taxa <- rownames(counts)[rowSums(counts >= min_reads) >= n_samples]
+  wascores <- wascores(cmdScale, as.data.frame(t(vsdv0[taxa,])))
+  
+  wascores.comp1 <- wascores[order(abs(wascores[,1]),decreasing=T),1][1:20]
+  wascores.comp2 <- wascores[order(abs(wascores[,2]),decreasing=T),2][1:20]
+    
+                     
+  plot.wascores.comp1 <- ggplot()+
+    geom_bar(aes(x=!!wascores.comp1,
+                 y=!!factor(names(wascores.comp1),levels=rev(names(wascores.comp1)))),
+             stat="identity")+
+    labs(title=paste0("MDS1 WA Scores\n",title),x="weighted average scores",y="")+
+    theme_bw()+
+    theme(plot.title = element_text(size=8))
+  
+  plot.wascores.comp2 <- ggplot()+
+    geom_bar(aes(x=!!wascores.comp2,
+                 y=!!factor(names(wascores.comp2),levels=rev(names(wascores.comp2)))),
+             stat="identity")+
+    labs(title=paste0("MDS2 WA Scores\n",title),x="weighted average scores",y="")+
+    theme_bw()+
+    theme(plot.title = element_text(size=8))
+  
+  plot.list <- list(mds=plot.mds,
+                    loadings1=plot.wascores.comp1,
+                    loadings2=plot.wascores.comp2)
+  return(plot.list)
+}
+```
+
+```{r,fig.height=6,fig.width=6}
+plot.df <- counts[,grep("[Nn]eg",colnames(counts),invert=T)]
+
+title="Viral MAGs"
+plot <- plot_braycurtis_mds(plot.df,
+                            paste0("c",clusters)
+                            ,title,labs = T)
+plot$mds+
+  scale_color_manual(values=c("#000000","#e895b0","#88bf5a","#6ebbf3"))
+```
+
+
+# DE analysis based off hierarchical clustering groups
+
+## Set DE functions
+```{r}
+edgeR <- function(counts,groups){
+  design <- model.matrix(~groups)
+
+  y <- DGEList(counts=counts,
+                 group=groups)
+  keep <- filterByExpr(y)  
+  y <- y[keep, , keep.lib.sizes = F]
+  if(nrow(y$counts) < 10){return(as.data.frame(matrix(nrow=0,ncol=5)))}
+  y <- calcNormFactors(y, method="TMM")
+  y <- estimateDisp(y,design, robust=TRUE)
+  fit <- glmQLFit(y,design,robust=TRUE)
+    
+  qlf <- glmQLFTest(fit,coef=2:(ncol(design)))
+  degenes <- topTags(qlf,n=Inf)
+  return(degenes)
+}
+```
+
+## Run edgeR
+```{r}
+counts <- counts[,grep("[Nn]eg",colnames(counts),invert=T)]
+groups <- paste0("c",clusters)
+groups <- factor(groups,levels=c("c1","c2","c3","c4"))
+
+detaxa <- list()
+for(i in 1:length(levels(groups))){
+  groups.subset <- ifelse(groups == levels(groups)[i],as.character(groups),"other")
+  groups.subset <- factor(groups.subset,levels=c(levels(groups)[i],"other"))
+  edgeR.output <- edgeR(counts,groups.subset)$table
+  if(!is.null(edgeR.output)){
+    detaxa[[i]] <- edgeR.output[order(edgeR.output$FDR),]
+  }else{
+    detaxa[[i]] <- NA
+  }
+}
+names(detaxa) <- levels(groups)
+```
+
+## Plot distinct taxa for each cluster
+
+```{r,fig.height=7,fig.width=8}
+cluster_col <- c("#000000","#e895b0","#88bf5a","#6ebbf3")
+plot.df <- as.data.frame(matrix(nrow=0,
+                                ncol=4))
+
+plot.list <- list()
+for(i in 3:length(detaxa)){
+  keytaxa <- detaxa[[i]][detaxa[[i]]$FDR < 0.05 & detaxa[[i]]$logFC < 0,]
+  keytaxa <- keytaxa[order(keytaxa$logFC),]
+  if(nrow(keytaxa) > 20){
+    keytaxa <- keytaxa[1:20,]
+  }
+  
+  plot.df <- as.data.frame(cbind(rownames(keytaxa),
+                                 -keytaxa$logFC))
+  colnames(plot.df) <- c("taxa","logFC")
+  plot.df$relab <- rowMeans(relab[plot.df$taxa,
+                                  grep("[Nn]eg",colnames(relab),invert=T)])
+  
+  plot.df[,1] <- factor(plot.df[,1],levels=rev(plot.df[,1]))
+  
+  plot.list[[i]] <- ggplot()+
+    geom_point(aes(x=!!as.numeric(as.character(plot.df$logFC)),
+                   y=!!plot.df$taxa,
+                   size=!!plot.df$relab+1),
+               alpha=0.75,
+               fill=cluster_col[i],
+               pch=21)+
+    coord_cartesian(xlim=c(-1,5))+
+    guides(size="none")+
+    labs(x="logFC",y="",size="relab",title=names(detaxa)[i])+
+    theme_bw()+
+    scale_size(breaks=c(0.01,0.1,1,10),trans="sqrt",limits=c(0.01,40))
+
+}
+
+egg::ggarrange(plots = plot.list,
+               nrow=2)
+```
+
+# CRISPR array analysis
+
+## Read in bacteria annotation results
+```{r}
+gtdbtk.anno <- read.delim(paste0(WORKING.DIR,"/gtdbtk/gtdbtk.bac120.summary.tsv"))
+vamb.clusters <- read.delim(paste0(WORKING.DIR,"/vamb/output/clusters.tsv"),header=F)
+```
+
+```{r}
+samples <- list.files(paste0(WORKING.DIR,"/crispr_array_analysis/"),
+                      pattern="[.]tsv")
+samples <- gsub("[.]bacteria.readhits.tsv","",samples)
+samples <- gsub("[.]virus.readhits.tsv","",samples)
+samples <- unique(samples)
+
+both_hits <- as.data.frame(matrix(nrow=0,
+                                  ncol=4))
+colnames(both_hits) <- c("sample","spacer","bacteria","virus")
+
+empty_samples <- c("MG_30981.TR4","MG_6852.TR4","MG_7431.TR2","MG_9109.TR2","MG_9361.TR1",
+                   "MG_Neg.2.21","MG_Neg.2.28","MG_Neg.3.5","MG_neg.4.5","MG_Neg.7.10",
+                   "MG_Neg.7.16","MG_Neg.7.20","MG_Neg.7.3","MG_Neg.7.4","MG_neg.8.2",
+                   "MG_Neg.8.2","MG_neg.8.7")
+for(i in 1:length(samples)){
+  if(!(samples[i] %in% empty_samples)){
+    bacteria_hits <- read.delim(paste0(WORKING.DIR,"/crispr_array_analysis/",samples[i],".bacteria.readhits.tsv"),header=F)
+    bacteria_hits[,2] <- vamb.clusters[match(bacteria_hits[,2],vamb.clusters[,2]),1]
+    bacteria_hits[,2] <- gtdbtk.anno$classification[match(bacteria_hits[,2],gtdbtk.anno$user_genome)]
+    
+    viral_hits <- read.delim(paste0(WORKING.DIR,"/crispr_array_analysis/",samples[i],".virus.readhits.tsv"),header=F)
+    viral_hits[,2] <- vcontact2.contig_map$genus_assignment[match(viral_hits[,2],paste0(vcontact2.contig_map$sample,"|",vcontact2.contig_map$contig))]
+    # blast_hits_to_taxa <- blast_hits_to_taxa[match(viral_hits[,2],paste0(blast_hits_to_taxa[,1],"|",blast_hits_to_taxa[,2])),]
+    
+    spacers <- c(bacteria_hits[,1],viral_hits[,1])
+    spacers <- unique(spacers[duplicated(spacers)])
+    
+    if(length(spacers) > 0){
+      both_hits.subset <- as.data.frame(cbind(samples[i],
+                                              spacers,
+                                              bacteria_hits[match(spacers,bacteria_hits[,1]),2],
+                                              viral_hits[match(spacers,viral_hits[,1]),2]))
+      colnames(both_hits.subset) <- c("sample","spacer","bacteria","virus")
+      
+      both_hits <- as.data.frame(rbind(both_hits,
+                                       both_hits.subset))
+    }
+  }
+}
+```
+
+```{r}
+crass_hits <- both_hits
+
+write.table(counts,
+            paste0(WORKING.DIR,"/counts.vcontact2.tsv"),
+            row.names = T,
+            col.names = T,
+            quote = F,
+            sep = "\t")
+
+write.table(crass_hits,
+            paste0(WORKING.DIR,"/crispr_array_hits.vcontact2.tsv"),
+            row.names = F,
+            col.names = T,
+            quote = F,
+            sep = "\t")
+
+clusters.df <- as.data.frame((cbind(colnames(plot.df),
+                                    paste0("c",clusters))))
+write.table(clusters.df,
+            paste0(WORKING.DIR,"/clusters.vcontact2.tsv"),
+            row.names = F,
+            col.names = F,
+            quote = F,
+            sep = "\t")
+```

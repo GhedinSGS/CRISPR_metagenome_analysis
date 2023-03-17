@@ -1,0 +1,86 @@
+# Conduct MAG analysis
+
+## Assemble contigs from metagenome samples
+```{bash, eval = F}
+module load spades/3.15.2
+
+find "$WORKING_DIR"/reads/ -name "*.1.fastq.gz" | sed "s/[.][12].fastq.gz//g" | sed "s/.*\\///g" | sort -n | while read SAMPLE
+do
+qsub -pe threaded 16 -l h_vmem=10G -cwd -b y spades.py --meta -t 16 -1 "$WORKING_DIR"/reads/"$SAMPLE".1.fastq.gz -2 "$WORKING_DIR"/reads/"$SAMPLE".2.fastq.gz -o "$WORKING_DIR"/spades/"$SAMPLE"/
+done
+```
+## Create bacterial MAG library
+
+### Concatenate SPAdes outputs to create MAG library
+
+```{bash, eval = F}
+module load vamb/3.0.9
+
+CONCAT_SPADES_OUTPUT_FNA=$(find "$WORKING_DIR"/spades -name "contigs.fasta" | tr '\n' ' ')
+echo -e "concatenate.py "$WORKING_DIR"/vamb/catalogue.fna.gz "$CONCAT_SPADES_OUTPUT_FNA"" | qsub -l h_vmem=20G -cwd
+```
+
+### Map reads to MAG library
+
+```{bash, eval = F}
+module load minimap2/2.24
+module load samtools/1.9-goolf-1.7.20
+qsub -l h_vmem=20G -cwd -b y minimap2 -d "$WORKING_DIR"/vamb/catalogue.mmi "$WORKING_DIR"/vamb/catalogue.fna.gz
+
+find "$WORKING_DIR"/reads/ -name "*.1.fastq.gz" | sed "s/[.][12].fastq.gz//g" | sed "s/.*\\///g" | sort -n | while read SAMPLE
+do
+echo -e "minimap2 -t 16 -N 5 -ax sr "$WORKING_DIR"/vamb/catalogue.mmi --split-prefix "$WORKING_DIR"/vamb/"$SAMPLE".mmsplit "$WORKING_DIR"/reads/"$SAMPLE".1.fastq.gz "$WORKING_DIR"/reads/"$SAMPLE".2.fastq.gz | samtools view -F 3584 -@ 16 - | samtools sort -@ 8 -o "$WORKING_DIR"/vamb/"$SAMPLE".bam -" | qsub -pe threaded 16 -l h_vmem=5G -cwd
+done
+```
+
+### Index BAM files
+
+```{bash, eval = F}
+module load samtools/1.9-goolf-1.7.20
+
+for BAM in $(ls "$WORKING_DIR"/vamb/*.sorted.bam)
+do
+qsub -b y samtools index "$BAM"
+done
+```
+
+### Cluster MAGs using vamb
+
+```{bash, eval = F}
+module load vamb/3.0.9
+qsub -l h_vmem=50G -cwd -b y vamb --outdir "$WORKING_DIR"/vamb/output --fasta "$WORKING_DIR"/vamb/catalogue.fna.gz --bamfiles "$WORKING_DIR"/vamb/*bam -o C --minfasta 200000
+```
+
+### Assign taxonomy to MAG clusters using GTDB-Tk
+
+```{bash, eval = F}
+module load gtdbtk/2.1.1
+qsub -pe threaded 16 -l h_vmem=10G -cwd -b y gtdbtk classify_wf --genome_dir  "$WORKING_DIR"/vamb/output/bins --out_dir "$WORKING_DIR"/gtdbtk --cpus 16
+```
+
+### Map reads to MAGs
+```{bash, eval = F}
+module load minimap2/2.24
+module load samtools/1.9-goolf-1.7.20
+
+find "$WORKING_DIR"/reads/ -name "*.1.fastq.gz" | grep -v metatranscriptome | sed "s/[.][12].fastq.gz//g" | sed "s/.*\\///g" | sort -n | while read SAMPLE
+do
+echo -e "minimap2 -t 16 -ax sr "$WORKING_DIR"/minimap2/bacteria.fna "$WORKING_DIR"/reads/"$SAMPLE".1.fastq.gz "$WORKING_DIR"/reads/"$SAMPLE".2.fastq.gz | samtools view -F 2308 -b --threads 16 - | samtools sort -@ 16 -o "$WORKING_DIR"/minimap2/"$SAMPLE".bacteria.bam -" | qsub -pe threaded 16 -l h_vmem=5G -cwd
+done
+```
+
+### Quantify MAGs
+```{bash, eval = F}
+find "$WORKING_DIR"/minimap2/ -name "*.bam" | grep bacteria | while read BAM
+do
+qsub -pe threaded 16  -l h_vmem=5G -cwd -b y samtools index -@ 16 "$BAM"
+done
+
+find "$WORKING_DIR"/minimap2/ -name "*.bam" | grep bacteria | while read BAM
+do
+echo -e "samtools idxstats -@ 16 "$BAM" > "$BAM".idxstats.tsv" | qsub -pe threaded 16  -l h_vmem=5G -cwd
+done
+```
+
+## Differential abundance analysis
+Bacteria_DA_analysis.R

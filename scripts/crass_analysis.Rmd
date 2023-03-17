@@ -1,0 +1,94 @@
+
+```{r}
+# library(ggplot2)
+# library(matrixStats)
+# library(randomcoloR)
+# library(reshape2)
+
+WORKING.DIR="z:/mchung/lingdi_zhang_01/"
+```
+
+## Load upstream data
+```{r}
+load(paste0(WORKING.DIR,"/virus_upstream.R"))
+```
+```{r}
+gtdbtk.anno <- read.delim(paste0(WORKING.DIR,"/gtdbtk/gtdbtk.bac120.summary.tsv"))
+vamb.clusters <- read.delim(paste0(WORKING.DIR,"/vamb/output/clusters.tsv"),header=F)
+```
+
+```{r}
+samples <- list.files(paste0(WORKING.DIR,"/crispr_array_analysis/"),
+                      pattern="[.]tsv")
+samples <- gsub("[.]bacteria.readhits.tsv","",samples)
+samples <- gsub("[.]virus.readhits.tsv","",samples)
+samples <- unique(samples)
+
+both_hits <- as.data.frame(matrix(nrow=0,
+                                  ncol=4))
+colnames(both_hits) <- c("sample","spacer","bacteria","virus")
+
+empty_samples <- c("MG_30981.TR4","MG_6852.TR4","MG_7431.TR2","MG_9109.TR2","MG_9361.TR1",
+                   "MG_Neg.2.21","MG_Neg.2.28","MG_Neg.3.5","MG_neg.4.5","MG_Neg.7.10",
+                   "MG_Neg.7.16","MG_Neg.7.20","MG_Neg.7.3","MG_Neg.7.4","MG_neg.8.2",
+                   "MG_Neg.8.2","MG_neg.8.7")
+for(i in 1:length(samples)){
+  if(!(samples[i] %in% empty_samples)){
+    bacteria_hits <- read.delim(paste0(WORKING.DIR,"/crispr_array_analysis/",samples[i],".bacteria.readhits.tsv"),header=F)
+    bacteria_hits[,2] <- vamb.clusters[match(bacteria_hits[,2],vamb.clusters[,2]),1]
+    bacteria_hits[,2] <- gtdbtk.anno$classification[match(bacteria_hits[,2],gtdbtk.anno$user_genome)]
+    
+    viral_hits <- read.delim(paste0(WORKING.DIR,"/crispr_array_analysis/",samples[i],".virus.readhits.tsv"),header=F)
+    viral_hits[,2] <- blast_hits_to_taxa$species[match(viral_hits[,2],paste0(blast_hits_to_taxa[,1],"|",blast_hits_to_taxa[,2]))]
+    # blast_hits_to_taxa <- blast_hits_to_taxa[match(viral_hits[,2],paste0(blast_hits_to_taxa[,1],"|",blast_hits_to_taxa[,2])),]
+    
+    spacers <- c(bacteria_hits[,1],viral_hits[,1])
+    spacers <- unique(spacers[duplicated(spacers)])
+    
+    if(length(spacers) > 0){
+      both_hits.subset <- as.data.frame(cbind(samples[i],
+                                              spacers,
+                                              bacteria_hits[match(spacers,bacteria_hits[,1]),2],
+                                              viral_hits[match(spacers,viral_hits[,1]),2]))
+      colnames(both_hits.subset) <- c("sample","spacer","bacteria","virus")
+      
+      both_hits <- as.data.frame(rbind(both_hits,
+                                       both_hits.subset))
+    }
+  }
+}
+```
+
+```{r}
+
+crass_hits <- both_hits
+save(file = paste0(WORKING.DIR,"/lingdi_upstream.R"),
+     counts,
+     clusters,
+     crass_hits)
+
+load(paste0(WORKING.DIR,"/lingdi_upstream.R"))
+
+write.table(counts,
+            paste0(WORKING.DIR,"/counts.tsv"),
+            row.names = T,
+            col.names = T,
+            quote = F,
+            sep = "\t")
+
+write.table(crass_hits,
+            paste0(WORKING.DIR,"/crispr_array_hits.tsv"),
+            row.names = F,
+            col.names = T,
+            quote = F,
+            sep = "\t")
+
+clusters.df <- as.data.frame((cbind(colnames(plot.df),
+                                    paste0("c",clusters))))
+write.table(clusters.df,
+            paste0(WORKING.DIR,"/clusters.tsv"),
+            row.names = F,
+            col.names = F,
+            quote = F,
+            sep = "\t")
+```

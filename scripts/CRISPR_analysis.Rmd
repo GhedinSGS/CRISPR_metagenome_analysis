@@ -1,0 +1,283 @@
+---
+title: "All_analysis"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r spacer analysis part 1: parse the spacer cluster files}
+
+setwd("~/Desktop/Draft\ paper\ 2021/analysis\ data")
+
+clstr <- read.csv("spacers_pool_rename_cluster.clstr", sep = "\t", row.names = NULL, header = FALSE, stringsAsFactors = FALSE)
+clstr2 <- clstr
+n = nrow(clstr)
+x = 0
+search_number <- function(x) !grepl("\\D", x)
+for (row in c(1:n)) {
+  if (search_number(clstr2[row,1]) == TRUE) {
+    clstr2[row,1] <- x}
+  else {NULL}
+  x <- clstr2[row,1]
+}
+
+require(reshape)
+df=clstr2
+df[df==""]<-NA
+df$V3<-NULL
+df<-df[complete.cases(df),]
+
+df_2 <- data.frame(do.call('rbind', strsplit(as.character(df$V2),',',fixed=TRUE)))
+df_3 <- data.frame(do.call('rbind', strsplit(as.character(df_2$X2),'.',fixed=TRUE)))
+
+DF=data.frame(df$V1,data.frame(do.call('rbind', strsplit(as.character(df_3$X1),'|',fixed=TRUE))),paste(df_3$X1,df_3$X2,sep="."))
+              
+write.table(DF,"spacers_pool_rename_cluster_results",col.names = FALSE, sep="\t",quote=FALSE,row.names = FALSE)
+
+
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r spacer profile analysis part 2: spacer profile analysis}
+#figures for sample and individual spacer profile analysis
+
+Data=read.table("spacers_pool_rename_cluster_results",header=FALSE,sep="\t")
+metadata=read.table("metadata_all.txt",header=TRUE,sep="\t")
+
+Data$V4<-gsub("_2","",Data$V4)
+Data$V5=gsub(".*\\|","",Data$V4)
+
+Data$V6="1"
+Data$V6=as.numeric(as.character(Data$V6))
+Data$V2<-NULL
+Data$V4<-NULL
+Data=unique(Data)
+Total=data.frame(table(Data$V5))
+compare<-function(x,y){connection=length(intersect(x,y))*2/(length(x)+length(y))}
+samples=unique(Data$V5)
+compute=list()
+for(i in 1:length(samples)){compute[[i]]=list()}
+for(i in 1:length(samples)){for(j in 1:length(samples)){compute[[i]][[j]]=data.frame(samples[i],samples[j],compare(Data[which(Data$V5==samples[i]),]$V1,Data[which(Data$V5==samples[j]),]$V1))}}
+
+library(data.table)
+Data_combine_1=list()
+for(i in 1:length(samples)){Data_combine_1[[i]]=rbindlist(compute[[i]])}
+Data_combine=rbindlist(Data_combine_1)
+colnames(Data_combine)=c("sample_1","sample_2","norm_connection")
+Data_combine=Data_combine[which(Data_combine$sample_1!=Data_combine$sample_2),]
+Data_combine$Individual_1=gsub("\\..*","",Data_combine$sample_1)
+Data_combine$Individual_2=gsub("\\..*","",Data_combine$sample_2)
+Data_combine$HH_1=metadata[match(Data_combine$Individual_1,metadata$Individual),]$Household
+Data_combine$HH_2=metadata[match(Data_combine$Individual_2,metadata$Individual),]$Household
+Data_combine$Individual="Different Individuals"
+Data_combine[which(Data_combine$Individual_1==Data_combine$Individual_2),]$Individual="Same Individual"
+Data_combine$Household="Different Household"
+Data_combine[which(Data_combine$HH_1==Data_combine$HH_2),]$Household="Same Household"
+library(ggplot2)
+p=ggplot(data=Data_combine,aes(x=Individual,y=norm_connection,color=Household))+geom_boxplot(position = position_dodge2(preserve = "single",width = 0.5),outlier.shape = NA)+geom_point(position = position_jitterdodge(0.5),size=0.2)+stat_boxplot(geom ='errorbar',position = position_dodge2(preserve = "single"))+theme(plot.title = element_text(hjust = 0.5),panel.background = element_blank(),panel.grid.major = element_line(colour="light grey",size=0.1),panel.grid.minor = element_line(colour="light grey",size=0.1),strip.background = element_blank(),panel.border = element_rect(colour = "black", fill=NA),aspect.ratio = 1,panel.spacing = unit(1, "lines"))+ylab("Percentage of spacers shared between two samples")+xlab("Individual group")+scale_color_manual(values=c("orange","purple"))
+
+ggsave("spacers_dist_sample_level.pdf",p,height = 5,width = 5,useDingbats=FALSE)
+
+p1=ks.test(Data_combine[which(Data_combine$Household=="Same Household"),]$norm_connection, Data_combine[which(Data_combine$Household=="Different Household"),]$norm_connection)
+
+p2=ks.test(Data_combine[which(Data_combine$Individual=="Same Individual"),]$norm_connection, Data_combine[which(Data_combine$Individual=="Different Individuals"),]$norm_connection)
+###
+Data_individuals=data.frame(Data$V1,Data$V3)
+colnames(Data_individuals)<-c("clusters","Individuals")
+Data_individuals=unique(Data_individuals)
+Individuals=unique(Data_individuals$Individuals)
+Total_clusters_individual=data.frame(table(Data_individuals$Individuals))
+compute=list()
+for(i in 1:length(Individuals)){compute[[i]]=list()}
+for(i in 1:length(Individuals)){for(j in 1:length(Individuals)){compute[[i]][[j]]=data.frame(Individuals[i],Individuals[j],compare(Data_individuals[which(Data_individuals$Individuals==Individuals[i]),]$clusters,Data_individuals[which(Data_individuals$Individuals==Individuals[j]),]$clusters))}}
+library(data.table)
+Data_combine_1=list()
+for(i in 1:length(Individuals)){Data_combine_1[[i]]=rbindlist(compute[[i]])}
+Data_combine=rbindlist(Data_combine_1)
+
+colnames(Data_combine)=c("Individual_1","Individual_2","norm_connection")
+Data_combine=Data_combine[which(Data_combine$Individual_1!=Data_combine$Individual_2),]
+Data_combine$HH_1=metadata[match(Data_combine$Individual_1,metadata$Individual),]$Household
+Data_combine$HH_2=metadata[match(Data_combine$Individual_2,metadata$Individual),]$Household
+Data_combine$Household="Different Household"
+Data_combine[which(Data_combine$HH_1==Data_combine$HH_2),]$Household="Same Household"
+library(ggplot2)
+p1=ggplot(data=Data_combine,aes(y=Household,x=norm_connection,color=Household))+geom_boxplot(position = position_dodge2(preserve = "single"),outlier.shape = NA,width = 0.5)+geom_point(position = position_jitterdodge(0.5),size=0.1)+stat_boxplot(geom ='errorbar',width=0.5)+theme(panel.margin = unit(0,"null"),aspect.ratio = 0.3,axis.text.x = element_blank(),axis.ticks.x=element_blank(),axis.title.x = element_blank(),axis.title.y = element_blank(),plot.title = element_text(hjust = 0.5),panel.background = element_blank(),panel.grid.major = element_line(colour="light grey",size=0.1),panel.grid.minor = element_line(colour="light grey",size=0.1),strip.background = element_blank(),panel.border = element_rect(colour = "black", fill=NA),panel.spacing = unit(1, "lines"))+scale_color_manual(values=c("orange","purple"))
+
+ggsave("spacers_dist_Individual_level.pdf",p,height = 5,width = 5,useDingbats=FALSE)
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r spacer profile analysis part 3: select the filter cut-offs for individual network analysis using shared spacers}
+j1=max(Data_combine$norm_connection)
+j1
+i=0
+collect_connection=c()
+while(i <= j1){
+  A=Data_combine[which(Data_combine$norm_connection >= i),]
+  B=length(which(A$Household=="Different Household"))/length(which(A$Household=="Same Household"))
+  if(B >=0.9 & B<=1.1){collect_connection=c(collect_connection,i)}
+  i=i+0.001}
+
+#collect_connection=0.021 0.022 0.023
+i=0.021
+collect_connection=c()
+while(i <= 0.023){
+  A=Data_combine[which(Data_combine$norm_connection >= i),]
+  B=length(which(A$Household=="Different Household"))/length(which(A$Household=="Same Household"))
+  if(B <= 1.0001 & B >=0.9999){collect_connection=c(collect_connection,i)}
+  i=i+0.00001}
+  
+#select connection as 0.02187 where B=1
+#i=0.022
+
+#select the filter so that the different household individual pairs are removed. 
+j=max(Data_combine[which(Household=="Different Household"),]$norm_connection)
+j
+#j= 0.063
+p1=ks.test(Data_combine[which(Data_combine$Household=="Same Household"),]$norm_connection, Data_combine[which(Data_combine$Household=="Different Household"),]$norm_connection)
+#p-value < 2.2e-16
+#install.packages("ggstance")
+library("ggstance")
+p2<-ggplot(Data_combine, aes(x=norm_connection, fill=Household,color=Household))+geom_density(alpha=0.5)+theme(panel.margin = unit(0,"null"),plot.title = element_text(hjust = 0.5),panel.background = element_blank(),panel.grid.major = element_line(colour="light grey",size=0.1),panel.grid.minor = element_line(colour="light grey",size=0.1),strip.background = element_blank(),panel.border = element_rect(colour = "black", fill=NA),aspect.ratio = 1,panel.spacing = unit(1, "lines"))+xlab("Percent of spacers shared between two Individuals")+scale_fill_manual(values=c("orange","purple"))+scale_color_manual(values=c("orange","purple"))+geom_vline(xintercept = 0.022,color="black")+geom_vline(xintercept = 0.063,color="red")
+library("gridExtra")
+library("grid")
+
+ggsave("Individual_spacer_dist_combine.pdf",  plot = grid.draw(rbind(ggplotGrob(p1), ggplotGrob(p2), size = "last")),height = 7,width = 10)
+ggsave("Individual_spacer_dist.pdf",p,height = 5,width = 5,useDingbats=FALSE)
+
+
+
+```
+
+```{r spacer profile analysis part 4: network analysis and flu transmission correlation}
+
+###network graph 1
+library(igraph)
+Data_combine_filter=Data_combine[which(Data_combine$norm_connection >=0.02187),]
+edgelist<-data.frame(Data_combine_filter$Individual_1,Data_combine_filter$Individual_2,Data_combine_filter$norm_connection)
+colnames(edgelist)<-c("V1","V2","weight")
+g <- graph_from_data_frame(edgelist,directed = FALSE)
+#
+V(g)$household=metadata[match(V(g)$name,as.character(metadata$Individual)),]$Household
+
+graph <- simplify(g)
+fc <- fastgreedy.community(graph)
+#fc<-edge.betweenness.community(graph,directed=F)
+V(graph)$community <- fc$membership
+V(graph)$label=V(graph)$community
+
+V(graph)$color[V(graph)$household=="321"] <-"grey50"
+V(graph)$color[V(graph)$household=="319"] <-"tomato"
+V(graph)$color[V(graph)$household=="277"] <-"gold"
+V(graph)$color[V(graph)$household=="271"] <-"red"
+V(graph)$color[V(graph)$household=="279"] <-"blue"
+V(graph)$color[V(graph)$household=="259"] <-"purple"
+V(graph)$color[V(graph)$household=="261"] <-"pink"
+V(graph)$color[V(graph)$household=="293"] <-"orange"
+V(graph)$color[V(graph)$household=="336"] <-"green"
+V(graph)$color[V(graph)$household=="295"] <-"white"
+
+E(graph)$width <- E(graph)$weight*20
+
+pdf("test_community_0.02187_norm.pdf",useDingbats=FALSE)
+  plot(graph,vertex.size=8,vertex.color=V(graph)$color)
+dev.off()
+
+#network graph 2
+library(igraph)
+Data_combine_filter=Data_combine[which(Data_combine$norm_connection >  0.063),]
+
+edgelist<-data.frame(Data_combine_filter$Individual_1,Data_combine_filter$Individual_2,Data_combine_filter$norm_connection)
+colnames(edgelist)<-c("V1","V2","weight")
+g <- graph_from_data_frame(edgelist,directed = FALSE)
+
+V(g)$household=metadata[match(V(g)$name,as.character(metadata$Individual)),]$Household
+graph <- simplify(g)
+
+V(graph)$color[V(graph)$household=="321"] <-"grey50"
+V(graph)$color[V(graph)$household=="319"] <-"tomato"
+V(graph)$color[V(graph)$household=="277"] <-"gold"
+V(graph)$color[V(graph)$household=="271"] <-"red"
+V(graph)$color[V(graph)$household=="279"] <-"blue"
+V(graph)$color[V(graph)$household=="259"] <-"purple"
+V(graph)$color[V(graph)$household=="261"] <-"pink"
+V(graph)$color[V(graph)$household=="293"] <-"orange"
+V(graph)$color[V(graph)$household=="336"] <-"green"
+V(graph)$color[V(graph)$household=="295"] <-"white"
+
+E(graph)$width <- E(graph)$weight*5
+
+pdf("test_community_0.063_norm.pdf",useDingbats=FALSE)
+  plot(graph,vertex.size=8,vertex.color=V(g)$color,vertex.label.dist=-1.1)
+dev.off()
+
+Data_combine_filter$transmission=metadata[match(Data_combine_filter$Individual_1,metadata$Individual),]$flu.transmission
+
+metadata_count=unique(data.frame(metadata$Household,metadata$Individual))
+metadata_count$metadata.Individual<-NULL
+metadata_counts=data.frame(table(metadata_count))
+
+Data_combine_filter$total=metadata_counts[match(Data_combine_filter$HH_1,metadata_counts$metadata_count),]$Freq
+Data_combine_filter$norm_connection<-NULL
+Data_combine_filter_2=Data_combine_filter
+Data_combine_filter_2$Individual_2<-NULL
+Data_combine_filter_1=Data_combine_filter
+Data_combine_filter_1$Individual_1<-NULL
+colnames(Data_combine_filter_1)[1]="Individual"
+colnames(Data_combine_filter_2)[1]="Individual"
+Data_combine_2=rbind(Data_combine_filter_1,Data_combine_filter_2)
+Data_combine_2=unique(Data_combine_2)
+transmission_analysis=data.frame(table(Data_combine_2$HH_1))
+transmission_analysis$total=metadata_counts[match(transmission_analysis$Var1,metadata_counts$metadata_count),]$Freq
+
+transmission_analysis$per=transmission_analysis$Freq/transmission_analysis$total
+transmission_analysis$transmission=metadata[match(transmission_analysis$Var1,metadata$Household),]$flu.transmission
+
+p=ggplot(data=transmission_analysis,aes(x=Var1,y=per))+facet_grid(.~transmission,scale="free",space="free")+geom_point()+theme(axis.ticks.x=element_blank(),plot.title = element_text(hjust = 0.5),panel.background = element_blank(),panel.grid.major = element_line(colour="light grey",size=0.1),panel.grid.minor = element_line(colour="light grey",size=0.1),strip.background = element_blank(),panel.border = element_rect(colour = "black", fill=NA),panel.spacing = unit(1, "lines"))+ylab("percentage of Individual")+xlab("Household code")
+
+ggsave("percent_individual_sharing_spacers_per_household.pdf",p,width = 4,height = 4)
+
+
+```
+
+```{r CRISPR array analysis part 1: parse shared spacers between individuals}
+
+Data=read.table("spacers_pool_rename_cluster_results",header=FALSE,sep="\t")
+Individuals=as.character(unique(Data$V3))
+data_individuals_clusters=list()
+Data$V2<-NULL
+Data$V5<-NULL
+
+for(i in 1:length(Individuals)){data_individuals_clusters[[i]]=list()}
+for(i in 1:length(Individuals)){for (j in 1:length(Individuals)){a=subset(Data,Data$V3==Individuals[i]);b=subset(Data,Data$V3==Individuals[j]);clusters= intersect(a$V1,b$V1); if (length(clusters) > 0){data_individuals_clusters[[i]][[j]]=merge(a[which(a$V1 %in% clusters),],b[which(b$V1 %in% clusters),],by="V1",all=TRUE)}}}
+
+data_individuals_clusters_combine=list()
+for(i in 1:length(Individuals)){data_individuals_clusters_combine[[i]]=rbindlist(data_individuals_clusters[[i]])}
+data_individuals_share_cluster_combine=rbindlist(data_individuals_clusters_combine)
+colnames(data_individuals_share_cluster_combine)<-c("clusters","Individual_1","spacers_1","Individual_2","spacers_2")
+data_individuals_share_cluster_combine=data_individuals_share_cluster_combine[which(data_individuals_share_cluster_combine$Individual_1!=data_individuals_share_cluster_combine$Individual_2),]
+
+data_individuals_share_cluster_combine_2=data_individuals_share_cluster_combine[!duplicated(data.frame(t(apply(data_individuals_share_cluster_combine[c(2,4)], 1, sort)), data_individuals_share_cluster_combine$clusters)),]
+
+data_individuals_share_cluster_combine_2=subset(data_individuals_share_cluster_combine_2,data_individuals_share_cluster_combine_2$clusters!=0)
+
+write.table(data_individuals_share_cluster_combine,"Clusters_shared_individuals", col.names = TRUE, row.names = FALSE,quote=FALSE,sep="\t")
+
+
+```
+
+
+

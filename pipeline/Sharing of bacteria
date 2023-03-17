@@ -1,0 +1,29 @@
+#Mapping of reads have spacers to bacterial MAGs
+
+```{bash, eval = F}
+module load minimap2/2.24
+module load samtools/1.9-goolf-1.7.20
+
+cat "$WORKING_DIR"/vamb/output/bins/*fna > "$WORKING_DIR"/crispr_array_analysis/bacteria.fna
+cp "$WORKING_DIR"/minimap2/virus.fna "$WORKING_DIR"/crispr_array_analysis/virus.fna
+
+find "$WORKING_DIR"/spacers/ -name "*fa" | sed "s/[.]bacteria.*//g" | sed "s/.*\\///g" | sort -n | while read SAMPLE
+do
+echo -e "minimap2 -t 16 -ax sr "$WORKING_DIR"/crispr_array_analysis/virus.fna "$WORKING_DIR"/spacers/"$SAMPLE".bacteria_rename.fa | samtools view -F 4 -b --threads 16 - | samtools sort -@ 16 -o "$WORKING_DIR"/crispr_array_analysis/"$SAMPLE".virus.bam -" | qsub -pe threaded 16 -l h_vmem=5G -cwd
+echo -e "minimap2 -t 16 -ax sr "$WORKING_DIR"/crispr_array_analysis/bacteria.fna "$WORKING_DIR"/spacers/"$SAMPLE".bacteria_rename.fa | samtools view -F 4 -b --threads 16 - | samtools sort -@ 16 -o "$WORKING_DIR"/crispr_array_analysis/"$SAMPLE".bacteria.bam -" | qsub -pe threaded 16 -l h_vmem=5G -cwd
+done
+```
+
+```{bash, eval = F}
+module load samtools/1.9-goolf-1.7.20
+
+find "$WORKING_DIR"/crispr_array_analysis/ -name "*bam" | sed "s/.*\\///g" | sed "s/[.]bacteria.bam//g" | sed "s/[.]virus.bam//g" | sort -n | uniq | while read BAM
+do
+samtools view "$WORKING_DIR"/crispr_array_analysis/"$BAM".bacteria.bam | awk '{print $1"\t"$3}' > "$WORKING_DIR"/crispr_array_analysis/"$BAM".bacteria.readhits.tsv
+samtools view "$WORKING_DIR"/crispr_array_analysis/"$BAM".virus.bam | awk '{print $1"\t"$3}' > "$WORKING_DIR"/crispr_array_analysis/"$BAM".virus.readhits.tsv
+done
+
+#########Sharing of bacteria analysis between individuals
+Bacteria_sharing_between_individuals.R
+#####sharing of bacteria analysis between time points
+Bacteria_sharing_between_time_points.R
